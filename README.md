@@ -107,6 +107,52 @@ Response:
 }
 ```
 
+### MCP (Model Context Protocol) Endpoint
+
+PuppeteerProxy also exposes an MCP endpoint, allowing AI assistants (Claude Code, Claude Desktop, etc.) to call it directly as a tool.
+
+#### Client Configuration
+
+Add to your MCP client config (e.g. `~/.claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "puppeteer-proxy": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "x-api-key": "your_api_key"
+      }
+    }
+  }
+}
+```
+
+#### Tool: `fetch_page`
+
+Fetches a URL using headless Chrome with full JavaScript rendering and anti-bot-detection measures.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | The URL to fetch |
+| `method` | string | No | HTTP method (default: GET) |
+| `headers` | object | No | Custom request headers |
+| `data` | string | No | POST body data (JSON string) |
+| `proxy` | string | No | Upstream proxy URL |
+| `timeout` | number | No | Navigation timeout in ms (default: 30000) |
+
+#### Manual Testing
+
+```bash
+# Initialize a session
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "x-api-key: your_api_key" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+```
+
 ## Docker Deployment
 
 ```bash

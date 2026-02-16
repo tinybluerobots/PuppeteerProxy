@@ -8,6 +8,7 @@ A headless Chrome web fetching service with built-in anti-detection measures. Se
 - **Anti-detection** - Spoofs WebDriver, plugins, WebGL, user-agent client hints, and more to avoid bot detection
 - **Upstream proxy support** - Route browser traffic through an external proxy
 - **Simple REST API** - POST a URL, get the rendered page content
+- **MCP endpoint** - Use as an AI tool via the Model Context Protocol
 - **Lightweight** - Built with Bun for fast startup and low memory footprint
 
 ## Quick Start
@@ -60,6 +61,28 @@ curl -X POST http://localhost:8000/ \
   "text": "<html>...</html>"
 }
 ```
+
+## MCP (Model Context Protocol)
+
+PuppeteerProxy can be used as a tool by AI assistants via its MCP endpoint at `/mcp`.
+
+Add to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "puppeteer-proxy": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "x-api-key": "your-secret-key"
+      }
+    }
+  }
+}
+```
+
+This exposes a `fetch_page` tool that accepts a URL and returns the fully rendered page content.
 
 ## Anti-Detection Features
 
