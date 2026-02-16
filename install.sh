@@ -9,9 +9,14 @@ fi
 echo "Building puppeteerproxy..."
 bun build ./index.ts --compile --outfile puppeteerproxy
 
-echo "Installing dependencies on remote server..."
-ssh root@"$DESTINATION" '[ ! -d /root/.cache/puppeteer ] && sudo apt update && sudo apt install -y npm && npx playwright install-deps && npx puppeteer install chromium' || {
-    echo "Warning: Failed to install some dependencies, continuing..." >&2
+echo "Installing system dependencies on remote server..."
+ssh root@"$DESTINATION" 'command -v npx >/dev/null || (apt update && apt install -y npm)' || {
+    echo "Warning: Failed to install npm, continuing..." >&2
+}
+
+echo "Installing Chrome browser on remote server..."
+ssh root@"$DESTINATION" 'npx puppeteer@latest browsers install chrome' || {
+    echo "Warning: Failed to install Chrome, continuing..." >&2
 }
 
 echo "Stopping existing service..."
