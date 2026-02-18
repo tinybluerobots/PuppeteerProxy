@@ -176,3 +176,4 @@ docker run -p 8000:8000 \
 | `PORT` | Server port | 8000 |
 | `API_KEY` | API key for authentication | - |
 | `HTTP_PROXY` | Upstream proxy URL | - |
+| `MAX_PAGES` | Maximum concurrent browser pages | 5 |
