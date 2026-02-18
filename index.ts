@@ -425,6 +425,13 @@ function createMcpServer(): McpServer {
 const run = async () => {
   const app = express()
   app.use(express.json({ limit: '1mb' }))
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'Invalid JSON in request body' })
+      return
+    }
+    next(err)
+  })
   app.use(compression())
 
   function getHeader(req: express.Request, name: string): string | undefined {
