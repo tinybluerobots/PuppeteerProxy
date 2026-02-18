@@ -14,7 +14,7 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "compression": "^1.8.1",
     "express": "^5.2.1",
-    "puppeteer": "^24.37.3",
+    "puppeteer": "^24.37.4",
     "zod": "^4.3.6"
   },
   "scripts": {
