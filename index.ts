@@ -35,7 +35,6 @@ const BROWSER_ARGS = [
   '--disable-webrtc',
   '--disable-dev-shm-usage',
   '--disable-gpu',
-  '--single-process',
 ]
 
 // Persistent browser pool keyed by proxy URL (empty string = no proxy)
