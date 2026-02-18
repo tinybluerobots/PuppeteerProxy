@@ -27,16 +27,80 @@ const { url: PROXY_URL, user: PROXY_USER, pass: PROXY_PASS } = parseProxyUrl(
   process.env.HTTP_PROXY
 )
 
-async function launchBrowser(proxyUrl?: string): Promise<Browser> {
+const BROWSER_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-blink-features=AutomationControlled',
+  '--disable-features=IsolateOrigins,site-per-process',
+  '--disable-webrtc',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--single-process',
+]
+
+// Persistent browser pool keyed by proxy URL (empty string = no proxy)
+const browserPool = new Map<string, { browser: Browser; refCount: number }>()
+
+async function getBrowser(proxyUrl?: string): Promise<Browser> {
+  const key = proxyUrl || ''
+  const entry = browserPool.get(key)
+
+  if (entry) {
+    // Verify the browser is still alive
+    try {
+      await entry.browser.version()
+      entry.refCount++
+      return entry.browser
+    } catch {
+      // Browser died, remove from pool and launch a new one
+      browserPool.delete(key)
+    }
+  }
+
   const args = [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-blink-features=AutomationControlled',
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--disable-webrtc',
+    ...BROWSER_ARGS,
     ...(proxyUrl ? [`--proxy-server=${proxyUrl}`] : [])
   ]
-  return puppeteer.launch({ headless: true, args })
+  const browser = await puppeteer.launch({ headless: true, args })
+  browserPool.set(key, { browser, refCount: 1 })
+
+  browser.on('disconnected', () => {
+    browserPool.delete(key)
+  })
+
+  return browser
+}
+
+function releaseBrowser(proxyUrl?: string) {
+  const key = proxyUrl || ''
+  const entry = browserPool.get(key)
+  if (entry) {
+    entry.refCount = Math.max(0, entry.refCount - 1)
+  }
+}
+
+// Concurrency limiter to prevent too many pages at once
+const MAX_CONCURRENT_PAGES = 5
+let activePage = 0
+const pageQueue: Array<() => void> = []
+
+function acquirePageSlot(): Promise<void> {
+  if (activePage < MAX_CONCURRENT_PAGES) {
+    activePage++
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve) => {
+    pageQueue.push(resolve)
+  })
+}
+
+function releasePageSlot() {
+  activePage--
+  const next = pageQueue.shift()
+  if (next) {
+    activePage++
+    next()
+  }
 }
 
 type HttpRequest = {
@@ -54,27 +118,29 @@ type HttpResponse = {
 }
 
 async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
-  let browser: Browser | undefined
+  await acquirePageSlot()
+
+  let proxyUrl: string | undefined
+  let proxyUser: string | undefined
+  let proxyPass: string | undefined
+
+  // Use env var proxy if set, otherwise per-request proxy
+  if (PROXY_URL) {
+    proxyUrl = PROXY_URL
+    proxyUser = PROXY_USER
+    proxyPass = PROXY_PASS
+  } else if (httpRequest.proxy) {
+    const parsed = parseProxyUrl(httpRequest.proxy)
+    proxyUrl = parsed.url
+    proxyUser = parsed.user
+    proxyPass = parsed.pass
+  }
+
+  const browser = await getBrowser(proxyUrl)
+  let page: Awaited<ReturnType<Browser['newPage']>> | undefined
 
   try {
-    let proxyUser: string | undefined
-    let proxyPass: string | undefined
-
-    // Use env var proxy if set, otherwise per-request proxy
-    if (PROXY_URL) {
-      browser = await launchBrowser(PROXY_URL)
-      proxyUser = PROXY_USER
-      proxyPass = PROXY_PASS
-    } else if (httpRequest.proxy) {
-      const { url, user, pass } = parseProxyUrl(httpRequest.proxy)
-      browser = await launchBrowser(url)
-      proxyUser = user
-      proxyPass = pass
-    } else {
-      browser = await launchBrowser()
-    }
-
-    const page = await browser.newPage()
+    page = await browser.newPage()
 
     // Authenticate proxy if credentials provided
     if (proxyUser && proxyPass) {
@@ -233,9 +299,10 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
     page.setDefaultTimeout(httpRequest.timeout || 30000)
     await page.setRequestInterception(true)
 
-    page.on('request', async (request) => {
+    const currentPage = page
+    currentPage.on('request', async (request) => {
       // Only modify the main navigation request, let subrequests pass through normally
-      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      if (request.isNavigationRequest() && request.frame() === currentPage.mainFrame()) {
         await request.continue({
           method: httpRequest.method,
           headers: httpRequest.headers || {},
@@ -259,9 +326,11 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
       text: await response.text()
     }
   } finally {
-    if (browser) {
-      await browser.close()
+    if (page) {
+      await page.close().catch(() => {})
     }
+    releaseBrowser(proxyUrl)
+    releasePageSlot()
   }
 }
 
@@ -467,5 +536,18 @@ const run = async () => {
   })
 
   app.listen(process.env.PORT || 8000, () => console.log('Server is running'))
+
+  // Graceful shutdown: close all pooled browsers
+  const shutdown = async () => {
+    console.log('Shutting down, closing browsers...')
+    const closes = [...browserPool.values()].map(({ browser }) =>
+      browser.close().catch(() => {})
+    )
+    await Promise.all(closes)
+    browserPool.clear()
+    process.exit(0)
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
 }
 run()
