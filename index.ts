@@ -39,7 +39,7 @@ const BROWSER_ARGS = [
 ]
 
 // Persistent browser pool keyed by proxy URL (empty string = no proxy)
-const browserPool = new Map<string, { browser: Browser; refCount: number }>()
+const browserPool = new Map<string, { browser: Browser; refCount: number; lastUsed: number }>()
 
 async function getBrowser(proxyUrl?: string): Promise<Browser> {
   const key = proxyUrl || ''
@@ -50,6 +50,7 @@ async function getBrowser(proxyUrl?: string): Promise<Browser> {
     try {
       await entry.browser.version()
       entry.refCount++
+      entry.lastUsed = Date.now()
       return entry.browser
     } catch {
       // Browser died, remove from pool and launch a new one
@@ -62,7 +63,7 @@ async function getBrowser(proxyUrl?: string): Promise<Browser> {
     ...(proxyUrl ? [`--proxy-server=${proxyUrl}`] : [])
   ]
   const browser = await puppeteer.launch({ headless: true, args })
-  browserPool.set(key, { browser, refCount: 1 })
+  browserPool.set(key, { browser, refCount: 1, lastUsed: Date.now() })
 
   browser.on('disconnected', () => {
     browserPool.delete(key)
@@ -76,11 +77,25 @@ function releaseBrowser(proxyUrl?: string) {
   const entry = browserPool.get(key)
   if (entry) {
     entry.refCount = Math.max(0, entry.refCount - 1)
+    entry.lastUsed = Date.now()
   }
 }
 
+// Evict idle browsers every 30s — closes browsers idle >60s with no active pages
+const IDLE_TIMEOUT_MS = 60_000
+setInterval(async () => {
+  const now = Date.now()
+  for (const [key, entry] of browserPool) {
+    if (entry.refCount === 0 && now - entry.lastUsed > IDLE_TIMEOUT_MS) {
+      console.log(`Evicting idle browser for proxy: ${key || '(direct)'}`)
+      browserPool.delete(key)
+      await entry.browser.close().catch(() => {})
+    }
+  }
+}, 30_000)
+
 // Concurrency limiter to prevent too many pages at once
-const MAX_CONCURRENT_PAGES = 5
+const MAX_CONCURRENT_PAGES = parseInt(process.env.MAX_PAGES || '5', 10)
 let activePage = 0
 const pageQueue: Array<() => void> = []
 
