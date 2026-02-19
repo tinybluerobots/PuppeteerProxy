@@ -383,16 +383,18 @@ function createMcpServer(): McpServer {
     version: '1.0.0'
   })
 
-  mcp.tool(
+  mcp.registerTool(
     'fetch_page',
-    'Fetch a URL using a headless Chrome browser with full JavaScript rendering and anti-bot-detection measures',
     {
-      url: z.string().describe('The URL to fetch'),
-      method: z.string().optional().describe('HTTP method (default: GET)'),
-      headers: z.record(z.string(), z.string()).optional().describe('Custom request headers'),
-      data: z.string().optional().describe('POST body data (JSON string)'),
-      proxy: z.string().optional().describe('Upstream proxy URL'),
-      timeout: z.number().optional().describe('Navigation timeout in ms (default: 30000)')
+      description: 'Fetch a URL using a headless Chrome browser with full JavaScript rendering and anti-bot-detection measures',
+      inputSchema: {
+        url: z.string().describe('The URL to fetch'),
+        method: z.string().optional().describe('HTTP method (default: GET)'),
+        headers: z.record(z.string(), z.string()).optional().describe('Custom request headers'),
+        data: z.string().optional().describe('POST body data (JSON string)'),
+        proxy: z.string().optional().describe('Upstream proxy URL'),
+        timeout: z.number().optional().describe('Navigation timeout in ms (default: 30000)')
+      }
     },
     async (args) => {
       let parsedData: object | undefined
