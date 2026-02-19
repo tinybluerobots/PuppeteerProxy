@@ -41,6 +41,9 @@ const BROWSER_ARGS = [
 const browserPool = new Map<string, { browser: Browser; refCount: number; lastUsed: number }>()
 const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS || '3', 10)
 
+// Serialize getBrowser calls to prevent concurrent launches from exceeding MAX_BROWSERS
+let poolMutex = Promise.resolve()
+
 async function evictLruBrowser(): Promise<boolean> {
   let lruKey: string | undefined
   let lruTime = Infinity
@@ -62,40 +65,50 @@ async function evictLruBrowser(): Promise<boolean> {
 }
 
 async function getBrowser(proxyUrl?: string): Promise<Browser> {
-  const key = proxyUrl || ''
-  const entry = browserPool.get(key)
+  // Queue behind any in-flight getBrowser call so only one negotiates the pool at a time
+  const prev = poolMutex
+  let release!: () => void
+  poolMutex = new Promise<void>(r => { release = r })
+  await prev
 
-  if (entry) {
-    // Verify the browser is still alive
-    try {
-      await entry.browser.version()
-      entry.refCount++
-      entry.lastUsed = Date.now()
-      return entry.browser
-    } catch {
-      // Browser died, remove from pool and launch a new one
-      browserPool.delete(key)
+  try {
+    const key = proxyUrl || ''
+    const entry = browserPool.get(key)
+
+    if (entry) {
+      // Verify the browser is still alive
+      try {
+        await entry.browser.version()
+        entry.refCount++
+        entry.lastUsed = Date.now()
+        return entry.browser
+      } catch {
+        // Browser died, remove from pool and launch a new one
+        browserPool.delete(key)
+      }
     }
+
+    // Evict LRU idle browser if pool is at capacity
+    while (browserPool.size >= MAX_BROWSERS) {
+      const evicted = await evictLruBrowser()
+      if (!evicted) break // all browsers are active, allow overage
+    }
+
+    const args = [
+      ...BROWSER_ARGS,
+      ...(proxyUrl ? [`--proxy-server=${proxyUrl}`] : [])
+    ]
+    const browser = await puppeteer.launch({ headless: true, args })
+    browserPool.set(key, { browser, refCount: 1, lastUsed: Date.now() })
+
+    browser.on('disconnected', () => {
+      browserPool.delete(key)
+    })
+
+    return browser
+  } finally {
+    release()
   }
-
-  // Evict LRU idle browser if pool is at capacity
-  while (browserPool.size >= MAX_BROWSERS) {
-    const evicted = await evictLruBrowser()
-    if (!evicted) break // all browsers are active, allow overage
-  }
-
-  const args = [
-    ...BROWSER_ARGS,
-    ...(proxyUrl ? [`--proxy-server=${proxyUrl}`] : [])
-  ]
-  const browser = await puppeteer.launch({ headless: true, args })
-  browserPool.set(key, { browser, refCount: 1, lastUsed: Date.now() })
-
-  browser.on('disconnected', () => {
-    browserPool.delete(key)
-  })
-
-  return browser
 }
 
 function releaseBrowser(proxyUrl?: string) {
