@@ -177,3 +177,4 @@ docker run -p 8000:8000 \
 | `API_KEY` | API key for authentication | - |
 | `HTTP_PROXY` | Upstream proxy URL | - |
 | `MAX_PAGES` | Maximum concurrent browser pages | 5 |
+| `MAX_BROWSERS` | Maximum pooled browser instances (LRU eviction when full) | 3 |

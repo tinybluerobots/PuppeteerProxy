@@ -39,6 +39,27 @@ const BROWSER_ARGS = [
 
 // Persistent browser pool keyed by proxy URL (empty string = no proxy)
 const browserPool = new Map<string, { browser: Browser; refCount: number; lastUsed: number }>()
+const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS || '3', 10)
+
+async function evictLruBrowser(): Promise<boolean> {
+  let lruKey: string | undefined
+  let lruTime = Infinity
+
+  for (const [key, entry] of browserPool) {
+    if (entry.refCount === 0 && entry.lastUsed < lruTime) {
+      lruTime = entry.lastUsed
+      lruKey = key
+    }
+  }
+
+  if (lruKey === undefined) return false
+
+  const entry = browserPool.get(lruKey)!
+  browserPool.delete(lruKey)
+  console.log(`Evicting LRU browser for proxy: ${lruKey || '(direct)'} (pool full: ${browserPool.size + 1}/${MAX_BROWSERS})`)
+  await entry.browser.close().catch(() => {})
+  return true
+}
 
 async function getBrowser(proxyUrl?: string): Promise<Browser> {
   const key = proxyUrl || ''
@@ -55,6 +76,12 @@ async function getBrowser(proxyUrl?: string): Promise<Browser> {
       // Browser died, remove from pool and launch a new one
       browserPool.delete(key)
     }
+  }
+
+  // Evict LRU idle browser if pool is at capacity
+  while (browserPool.size >= MAX_BROWSERS) {
+    const evicted = await evictLruBrowser()
+    if (!evicted) break // all browsers are active, allow overage
   }
 
   const args = [
@@ -556,7 +583,7 @@ const run = async () => {
     await transport.handleRequest(req, res)
   })
 
-  app.listen(process.env.PORT || 8000, () => console.log('Server is running'))
+  app.listen(process.env.PORT || 8000, () => console.log(`Server is running (MAX_PAGES=${MAX_CONCURRENT_PAGES}, MAX_BROWSERS=${MAX_BROWSERS})`))
 
   // Graceful shutdown: close all pooled browsers
   const shutdown = async () => {
