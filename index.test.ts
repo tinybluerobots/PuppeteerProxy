@@ -247,6 +247,64 @@ describe('MCP endpoint', () => {
   })
 })
 
+describe('Resource blocking', () => {
+  test('blocks image and media subrequests but allows scripts', async () => {
+    const requestedPaths: string[] = []
+    const trackingServer = Bun.serve({
+      port: 9877,
+      fetch(req) {
+        const url = new URL(req.url)
+        requestedPaths.push(url.pathname)
+        if (url.pathname === '/') {
+          return new Response(`
+            <html>
+              <body>
+                <h1>Resource Test</h1>
+                <img src="/image.png">
+                <video src="/video.mp4"></video>
+                <script src="/script.js"></script>
+              </body>
+            </html>
+          `, { headers: { 'Content-Type': 'text/html' } })
+        }
+        if (url.pathname === '/script.js') {
+          return new Response('document.title = "loaded"', {
+            headers: { 'Content-Type': 'application/javascript' }
+          })
+        }
+        return new Response('', { status: 200 })
+      }
+    })
+
+    try {
+      const res = await fetch(`${BASE_URL}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY
+        },
+        body: JSON.stringify({
+          url: 'http://localhost:9877/',
+          timeout: 15000
+        })
+      })
+
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.status).toBe(200)
+      expect(body.text).toContain('Resource Test')
+
+      // Scripts should be allowed through
+      expect(requestedPaths).toContain('/script.js')
+      // Images and media should be blocked
+      expect(requestedPaths).not.toContain('/image.png')
+      expect(requestedPaths).not.toContain('/video.mp4')
+    } finally {
+      trackingServer.stop()
+    }
+  }, 30000)
+})
+
 describe('REST endpoint', () => {
   test('still works after MCP changes', async () => {
     const res = await fetch(`${BASE_URL}/`, {

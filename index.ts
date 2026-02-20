@@ -353,9 +353,10 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
     page.setDefaultTimeout(httpRequest.timeout || 30000)
     await page.setRequestInterception(true)
 
+    const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media', 'font'])
+
     const currentPage = page
     currentPage.on('request', async (request) => {
-      // Only modify the main navigation request, let subrequests pass through normally
       if (request.isNavigationRequest() && request.frame() === currentPage.mainFrame()) {
         await request.continue({
           method: httpRequest.method,
@@ -364,6 +365,8 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
             ? JSON.stringify(httpRequest.data)
             : undefined
         })
+      } else if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
+        await request.abort()
       } else {
         await request.continue()
       }
