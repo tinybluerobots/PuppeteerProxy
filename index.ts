@@ -5,7 +5,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { Mutex, withTimeout as mutexWithTimeout, Semaphore } from 'async-mutex';
 import compression from 'compression';
 import express from 'express';
-import puppeteer, { type Browser } from 'puppeteer';
+import puppeteer, { type Browser, type Cookie, type CookieParam } from 'puppeteer';
 import { z } from 'zod';
 
 // Race a promise against a timeout; rejects with a descriptive error on expiry
@@ -173,6 +173,7 @@ const pageSemaphore = mutexWithTimeout(
 );
 
 type HttpRequest = {
+  cookies?: CookieParam[];
   data: object;
   headers: Record<string, string>;
   method: string;
@@ -181,6 +182,7 @@ type HttpRequest = {
   url: string;
 };
 type HttpResponse = {
+  cookies: Cookie[];
   headers: Record<string, string>;
   status: number;
   text: string;
@@ -217,6 +219,11 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
           username: proxyUser,
           password: proxyPass,
         });
+      }
+
+      // Set cookies before navigation
+      if (httpRequest.cookies?.length) {
+        await page.setCookie(...httpRequest.cookies);
       }
 
       // Set user-agent via CDP (use from headers or default)
@@ -421,6 +428,7 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
           });
 
           return {
+            cookies: await page.cookies(),
             status: finalResponse?.status() ?? 200,
             headers: finalResponse?.headers() ?? {},
             text: await page.content(),
@@ -429,6 +437,7 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
           // Challenge may have resolved without a full navigation (inline reload).
           // Return current page content as fallback.
           return {
+            cookies: await page.cookies(),
             status: 200,
             headers: {},
             text: await page.content(),
@@ -437,6 +446,7 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
       }
 
       return {
+        cookies: await page.cookies(),
         status: response.status(),
         headers: response.headers(),
         text: await response.text(),
@@ -478,6 +488,21 @@ function createMcpServer(): McpServer {
           .number()
           .optional()
           .describe('Navigation timeout in ms (default: 30000)'),
+        cookies: z
+          .array(
+            z.object({
+              name: z.string(),
+              value: z.string(),
+              domain: z.string().optional(),
+              path: z.string().optional(),
+              expires: z.number().optional(),
+              httpOnly: z.boolean().optional(),
+              secure: z.boolean().optional(),
+              sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
+            }),
+          )
+          .optional()
+          .describe('Cookies to set before navigation'),
       },
     },
     async (args) => {
@@ -502,6 +527,7 @@ function createMcpServer(): McpServer {
         data: parsedData as object,
         proxy: args.proxy,
         timeout: args.timeout || 30000,
+        cookies: args.cookies as CookieParam[] | undefined,
       };
 
       try {
@@ -514,6 +540,7 @@ function createMcpServer(): McpServer {
               text: [
                 `Status: ${result.status}`,
                 `Headers: ${JSON.stringify(result.headers)}`,
+                `Cookies: ${JSON.stringify(result.cookies)}`,
                 '',
                 result.text,
               ].join('\n'),

@@ -326,5 +326,89 @@ describe('REST endpoint', () => {
     const body = await res.json();
     expect(body.status).toBe(200);
     expect(body.text).toContain('Example Domain');
+    expect(body.cookies).toBeArray();
+  }, 30000);
+});
+
+describe('Cookies', () => {
+  test('returns cookies set by the server', async () => {
+    const cookieServer = Bun.serve({
+      port: 9878,
+      fetch() {
+        return new Response('<html><body>Cookie Test</body></html>', {
+          headers: {
+            'Content-Type': 'text/html',
+            'Set-Cookie': 'session=abc123; Path=/',
+          },
+        });
+      },
+    });
+
+    try {
+      const res = await fetch(`${BASE_URL}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY,
+        },
+        body: JSON.stringify({
+          url: 'http://localhost:9878/',
+          timeout: 15000,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe(200);
+      expect(body.cookies).toBeArray();
+      expect(body.cookies.length).toBeGreaterThanOrEqual(1);
+
+      const sessionCookie = body.cookies.find(
+        (c: any) => c.name === 'session',
+      );
+      expect(sessionCookie).toBeDefined();
+      expect(sessionCookie.value).toBe('abc123');
+    } finally {
+      cookieServer.stop();
+    }
+  }, 30000);
+
+  test('sends cookies provided in the request', async () => {
+    let receivedCookie = '';
+    const cookieServer = Bun.serve({
+      port: 9879,
+      fetch(req) {
+        receivedCookie = req.headers.get('cookie') || '';
+        return new Response('<html><body>Cookie Echo</body></html>', {
+          headers: { 'Content-Type': 'text/html' },
+        });
+      },
+    });
+
+    try {
+      const res = await fetch(`${BASE_URL}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY,
+        },
+        body: JSON.stringify({
+          url: 'http://localhost:9879/',
+          timeout: 15000,
+          cookies: [
+            { name: 'token', value: 'xyz789', domain: 'localhost' },
+            { name: 'lang', value: 'en', domain: 'localhost' },
+          ],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe(200);
+      expect(receivedCookie).toContain('token=xyz789');
+      expect(receivedCookie).toContain('lang=en');
+    } finally {
+      cookieServer.stop();
+    }
   }, 30000);
 });
