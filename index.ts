@@ -416,7 +416,7 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
         );
         try {
           const finalResponse = await page.waitForNavigation({
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
             timeout: httpRequest.timeout || 30000,
           });
 
