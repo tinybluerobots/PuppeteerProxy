@@ -1,2 +1,6 @@
 [tools]
 bun = "latest"
+
+[tasks.lint]
+description = "Auto-format and lint with Biome"
+run = "bun biome check --write ."
