@@ -371,6 +371,9 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
 
       const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media', 'font']);
 
+      // Only inject custom method/headers/body on the first navigation.
+      // Subsequent navigations (e.g. WAF challenge redirects) pass through normally.
+      let isFirstNavigation = true;
       const currentPage = page;
       currentPage.on('request', async (request) => {
         try {
@@ -378,13 +381,18 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
             request.isNavigationRequest() &&
             request.frame() === currentPage.mainFrame()
           ) {
-            await request.continue({
-              method: httpRequest.method,
-              headers: httpRequest.headers || {},
-              postData: httpRequest.data
-                ? JSON.stringify(httpRequest.data)
-                : undefined,
-            });
+            if (isFirstNavigation) {
+              isFirstNavigation = false;
+              await request.continue({
+                method: httpRequest.method,
+                headers: httpRequest.headers || {},
+                postData: httpRequest.data
+                  ? JSON.stringify(httpRequest.data)
+                  : undefined,
+              });
+            } else {
+              await request.continue();
+            }
           } else if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
             await request.abort();
           } else {
@@ -398,6 +406,34 @@ async function fetchPage(httpRequest: HttpRequest): Promise<HttpResponse> {
       const response = await page.goto(httpRequest.url);
       if (!response) {
         throw new Error('No response received from page');
+      }
+
+      // Detect AWS WAF challenge/captcha responses and wait for resolution
+      const wafAction = response.headers()['x-amzn-waf-action'];
+      if (wafAction === 'challenge' || wafAction === 'captcha') {
+        console.log(
+          `WAF ${wafAction} detected for ${httpRequest.url}, waiting for resolution...`,
+        );
+        try {
+          const finalResponse = await page.waitForNavigation({
+            waitUntil: 'networkidle2',
+            timeout: httpRequest.timeout || 30000,
+          });
+
+          return {
+            status: finalResponse?.status() ?? 200,
+            headers: finalResponse?.headers() ?? {},
+            text: await page.content(),
+          };
+        } catch {
+          // Challenge may have resolved without a full navigation (inline reload).
+          // Return current page content as fallback.
+          return {
+            status: 200,
+            headers: {},
+            text: await page.content(),
+          };
+        }
       }
 
       return {

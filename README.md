@@ -1,6 +1,6 @@
 # PuppeteerProxy
 
-A headless Chrome web fetching service with built-in anti-detection measures. Send a URL, get the fully rendered page content back.
+A headless Chrome web fetching service with built-in anti-detection measures. Send a URL, get the fully rendered page content back — even behind Cloudflare and AWS WAF protection.
 
 ### Prerequisites
 
@@ -67,7 +67,7 @@ Request Body:
 | `method` | string | No | HTTP method (default: GET) |
 | `headers` | object | No | Custom headers to send |
 | `data` | object | No | Request body for POST/PUT requests |
-| `timeout` | number | No | Request timeout in ms (default: 10000) |
+| `timeout` | number | No | Request timeout in ms (default: 30000) |
 | `proxy` | string | No | Upstream proxy URL (ignored if `HTTP_PROXY` env var is set) |
 
 #### Upstream Proxy Configuration
@@ -152,6 +152,16 @@ curl -X POST http://localhost:8000/mcp \
   -H "x-api-key: your_api_key" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
 ```
+
+## Bot Protection Handling
+
+PuppeteerProxy automatically handles common bot protection systems:
+
+- **Anti-detection spoofing**: `navigator.webdriver`, WebGL, plugins, user-agent client hints, screen dimensions, and hardware properties are all spoofed to appear as a real Chrome 120 browser on Windows 10.
+- **AWS WAF challenges**: Detects `x-amzn-waf-action: challenge` or `captcha` responses, waits for the challenge JavaScript to solve and navigate, then returns the final page content.
+- **Cloudflare**: The anti-detection measures and real browser JavaScript execution handle Cloudflare's JS challenges transparently.
+
+Resource types `image`, `media`, and `font` are blocked to reduce bandwidth and speed up navigation.
 
 ## Docker Deployment
 
