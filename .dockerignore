@@ -3,3 +3,4 @@ Dockerfile
 .dockerignore
 .gitignore
 node_modules
+dist

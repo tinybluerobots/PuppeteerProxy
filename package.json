@@ -20,7 +20,8 @@
     "zod": "^4.3.6"
   },
   "scripts": {
-    "start": "bun build ./index.ts --target=node --outdir=build && node ./build/index.js",
+    "start": "bun run index.ts",
+    "build": "bun build --compile ./index.ts --outfile=dist/puppeteerproxy",
     "check": "biome check .",
     "lint": "biome check --write ."
   }
